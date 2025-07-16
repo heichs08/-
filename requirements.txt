@@ -3,3 +3,6 @@ numpy
 plotly
 koreanize-matplotlib
 imageio
+streamlit
+Pillow
+kaleido
