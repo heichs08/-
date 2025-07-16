@@ -339,6 +339,9 @@ def run_simulation(bh_mass_kg, star_mass_kg, planet_mass_kg,
         with simulation_placeholder:
             st.plotly_chart(fig_sim, use_container_width=True, config={'displayModeBar': False})
         
+        # Matplotlib 그래프 업데이트 (매 프레임마다 그리지 않고, 데이터만 축적)
+        # 마지막 프레임에서 최종 그래프를 그립니다.
+        
         time.sleep(0.01 / animation_speed)
 
     # 시뮬레이션이 끝난 후 Matplotlib 그래프를 그립니다.
