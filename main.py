@@ -1,7 +1,8 @@
 import streamlit as st
 import numpy as np
+import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-import time # 애니메이션 속도 제어를 위해 추가
+import time
 
 # --- 페이지 설정 ---
 st.set_page_config(
@@ -83,7 +84,7 @@ st.sidebar.markdown("Made with ❤️ by AI Assistant")
 
 # --- 시뮬레이션 영역 ---
 st.header("시뮬레이션")
-simulation_placeholder = st.empty() # 애니메이션 프레임을 표시할 곳
+simulation_placeholder = st.empty()
 
 # --- 그래프 영역 ---
 st.header("데이터 그래프")
@@ -94,45 +95,55 @@ magnification_graph_placeholder = st.empty()
 
 # --- 시뮬레이션 로직 함수 ---
 def run_simulation(bh_star_distance_km, planet_mass_kg, planet_star_distance_au, animation_speed):
-    num_frames = 400 # 프레임 수
+    num_frames = 200 # 프레임 수 증가 (더 부드러운 애니메이션)
     time_points = np.arange(num_frames)
     
-    # 시뮬레이션 스케일 조정 (1000만 km 단위를 1 단위로 매핑)
-    scale_factor = 1e-7
+    # 시뮬레이션 스케일 조정 (1000만 km 단위를 1000 단위로 매핑)
+    # 1 km = 1e-7 units, 10M km = 1 unit
+    scale_factor = 1e-7 # 1000만 km를 1 단위로 보기 위함
     bh_star_distance_scaled = bh_star_distance_km * scale_factor
 
     # 블랙홀 위치 (중심)
     bh_x, bh_y = 0, 0
 
     # 광원(항성) 경로: 블랙홀을 지나가도록 설정
-    source_x_path = np.linspace(-bh_star_distance_scaled * 0.8, bh_star_distance_scaled * 0.8, num_frames)
-    source_y_path = np.zeros(num_frames)
+    # -5에서 5까지 X축으로 이동 (시뮬레이션 스케일 기준)
+    source_x_path = np.linspace(-bh_star_distance_scaled, bh_star_distance_scaled, num_frames)
+    source_y_path = np.zeros(num_frames) # Y축은 0으로 고정 (블랙홀의 중심을 지나도록)
 
     # 행성 공전: 항성 주위를 공전하도록 설정
-    planet_orbit_radius_sim = planet_star_distance_au * 0.1
+    # 행성-항성 거리를 시뮬레이션 스케일에 맞게 조정
+    planet_orbit_radius_sim = planet_star_distance_au * 0.1 # AU를 시뮬레이션 스케일 (대략 1단위)에 맞게 조정
     
-    magnification_data_list = [] # 중력 렌즈 배율 데이터 저장
-
-    # 별의 고정된 위치를 미리 생성 (애니메이션 중 움직이지 않도록)
-    num_stars = 1000
-    star_x_bg = np.random.uniform(-bh_star_distance_scaled * 1.5, bh_star_distance_scaled * 1.5, num_stars)
-    star_y_bg = np.random.uniform(-bh_star_distance_scaled * 1.5, bh_star_distance_scaled * 1.5, num_stars)
-    star_sizes = np.random.uniform(1, 4, num_stars)
-    star_opacities = np.random.uniform(0.5, 1.0, num_stars)
+    frames = []
+    # 중력 렌즈 배율 데이터를 저장할 리스트
+    magnification_data_list = []
 
     for i in range(num_frames):
         current_source_x = source_x_path[i]
         current_source_y = source_y_path[i]
 
         # 행성 위치 (항성을 중심으로 공전)
-        planet_angle = 2 * np.pi * (i / (num_frames / 2))
+        # 항성의 현재 위치를 기준으로 행성을 배치
+        planet_angle = 2 * np.pi * (i / num_frames) # 시간에 따른 각도 변화
         planet_x = current_source_x + planet_orbit_radius_sim * np.cos(planet_angle)
         planet_y = current_source_y + planet_orbit_radius_sim * np.sin(planet_angle)
 
-        # 중력 렌즈 배율 계산
-        impact_parameter = np.abs(current_source_x) + 1e-5
-        magnification = 1 + (1 / impact_parameter) * 10.0
-        magnification = min(magnification, 70.0)
+        # 중력 렌즈 배율 계산 (간단화된 슈바르츠실트 블랙홀 모델 기반)
+        # 실제 물리 공식의 개념을 따름: 렌즈와 광원 사이의 '충격 매개변수'에 따라 달라짐
+        # d_lens_source = np.sqrt(current_source_x**2 + current_source_y**2)
+        # 여기서는 광원의 X축 위치(블랙홀 중심으로부터의 거리)를 사용
+        
+        # 광원과 블랙홀 중심 사이의 실제 거리 (시뮬레이션 스케일)
+        impact_parameter = np.abs(current_source_x) + 1e-5 # 0 나누기 방지
+        
+        # 렌즈 배율 공식 (근사치): A = (y^2 + 2) / (y * sqrt(y^2 + 4))
+        # 여기서 y는 무차원 충격 매개변수. y가 작을수록(중심에 가까울수록) 배율이 커짐
+        # 간단화를 위해 (1 / 거리) 형태로 배율을 모델링
+        magnification = 1 + (1 / impact_parameter) * 10.0 # 피크 높이 조절
+        
+        # 너무 큰 값 방지 (블랙홀 중심에 매우 가까워질 때 무한대로 가는 것을 방지)
+        magnification = min(magnification, 50.0) 
         magnification_data_list.append(magnification)
 
         fig_sim = go.Figure()
@@ -148,34 +159,25 @@ def run_simulation(bh_star_distance_km, planet_mass_kg, planet_star_distance_au,
             height=600
         )
 
-        # 배경 별
+        # 배경 별 (회색 점 - 흰색 배경에 맞춰 색상 변경)
+        num_stars = 300
+        star_x_bg = np.random.uniform(-bh_star_distance_scaled * 1.1, bh_star_distance_scaled * 1.1, num_stars)
+        star_y_bg = np.random.uniform(-bh_star_distance_scaled * 1.1, bh_star_distance_scaled * 1.1, num_stars)
         fig_sim.add_trace(go.Scatter(
             x=star_x_bg, y=star_y_bg,
             mode='markers',
-            marker=dict(size=star_sizes, color='lightgray', opacity=star_opacities),
+            marker=dict(size=2, color='lightgray'),
             name='Stars'
         ))
 
-        # 블랙홀의 아크리션 디스크 (강착원반)
-        for k in range(5, 0, -1):
-            disk_radius = np.cbrt(bh_star_distance_km / 1e6) * k * 0.5 / 5
-            color_val = int(255 * (k / 5))
-            fig_sim.add_shape(type="circle",
-                              xref="x", yref="y",
-                              x0=bh_x - disk_radius, y0=bh_y - disk_radius,
-                              x1=bh_x + disk_radius, y1=bh_y + disk_radius,
-                              fillcolor=f'rgba(255, {color_val}, 0, {0.1 + k*0.1})',
-                              line_width=0,
-                              layer="below")
-
-        # 보라빛 블랙홀 (중앙)
+        # 보라빛 블랙홀
         fig_sim.add_trace(go.Scatter(
             x=[bh_x], y=[bh_y],
             mode='markers',
             marker=dict(
-                size=np.cbrt(bh_star_distance_km / 1e6) * 5,
+                size=np.cbrt(bh_star_distance_km / 1e6) * 5, # 질량/거리 기반으로 크기 조절 (비율)
                 color='purple',
-                opacity=0.8,
+                opacity=0.7,
                 line=dict(width=0),
                 symbol='circle'
             ),
@@ -187,8 +189,8 @@ def run_simulation(bh_star_distance_km, planet_mass_kg, planet_star_distance_au,
             x=[current_source_x], y=[current_source_y],
             mode='markers',
             marker=dict(
-                size=15 + (magnification - 1) * 0.5,
-                color='gold',
+                size=15 + (magnification - 1) * 0.5, # 배율에 따라 크기 변화 (시각적 효과)
+                color='gold', # 항성 색상
                 opacity=0.9,
                 line=dict(width=0),
                 symbol='star'
@@ -200,28 +202,30 @@ def run_simulation(bh_star_distance_km, planet_mass_kg, planet_star_distance_au,
         fig_sim.add_trace(go.Scatter(
             x=[planet_x], y=[planet_y],
             mode='markers',
-            marker=dict(size=10, color='deepskyblue'),
+            marker=dict(size=10, color='deepskyblue'), # 행성 색상
             name='Exoplanet'
         ))
-        
-        # 실시간 시뮬레이션 표시
-        with simulation_placeholder:
-            st.plotly_chart(fig_sim, use_container_width=True, config={'displayModeBar': False})
-        time.sleep(0.05 / animation_speed) # 속도 조절
+
+        # 프레임 저장
+        frames.append(fig_sim)
 
     # --- 그래프 데이터 준비 ---
-    energy_data = np.sin(time_points / 20 * np.pi) * 5 + 15
-    distance_data = planet_orbit_radius_sim + np.cos(time_points / 30 * np.pi) * 0.05
+    energy_data = np.sin(time_points / 20 * np.pi) * 5 + 15 # 가상 에너지 변화
+    distance_data = planet_orbit_radius_sim + np.cos(time_points / 30 * np.pi) * 0.05 # 가상 거리 변화 (약간의 진동)
 
     fig_planet_props = make_planet_properties_graph(time_points, energy_data, distance_data)
     fig_magnification = make_magnification_graph(time_points, np.array(magnification_data_list))
 
-    return fig_planet_props, fig_magnification
+    return frames, fig_planet_props, fig_magnification
 
 def make_planet_properties_graph(time, energy, distance):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time, y=energy, mode='lines', name='에너지 변화', line=dict(color='lightgreen', width=2)))
-    fig.add_trace(go.Scatter(x=time, y=distance, mode='lines', name='거리 변화', line=dict(color='orange', width=2)))
+
+    fig.add_trace(go.Scatter(x=time, y=energy, mode='lines', name='에너지 변화',
+                             line=dict(color='lightgreen', width=2)))
+    fig.add_trace(go.Scatter(x=time, y=distance, mode='lines', name='거리 변화',
+                             line=dict(color='orange', width=2)))
+
     fig.update_layout(
         title="행성 운동 특성",
         xaxis_title="시간 (프레임)",
@@ -234,7 +238,10 @@ def make_planet_properties_graph(time, energy, distance):
 
 def make_magnification_graph(time, magnification):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time, y=magnification, mode='lines', name='배율', line=dict(color='crimson', width=2)))
+
+    fig.add_trace(go.Scatter(x=time, y=magnification, mode='lines', name='배율',
+                             line=dict(color='crimson', width=2))) # 빛의 세기(배율) 그래프 색상
+
     fig.update_layout(
         title="관측된 빛의 배율 변화 (중력 렌즈 효과)",
         xaxis_title="시간 (프레임)",
@@ -242,20 +249,23 @@ def make_magnification_graph(time, magnification):
         template="plotly_white",
         hovermode="x unified",
         height=300,
-        yaxis_range=[0, np.max(magnification)*1.1]
+        yaxis_range=[0, np.max(magnification)*1.1] # y축 범위 자동 조절
     )
     return fig
 
+
 # --- 시뮬레이션 실행 및 업데이트 ---
 if st.button("시뮬레이션 시작"):
-    with st.spinner("시뮬레이션 실행 중..."):
-        # GIF 관련 반환값과 로직을 제거하고, 그래프만 반환하도록 변경
-        fig_planet_props, fig_magnification = run_simulation(
-            bh_star_distance_km, planet_mass_kg, planet_star_distance_au, animation_speed
-        )
-        
-    st.success("시뮬레이션 완료!")
-    
+    frames, fig_planet_props, fig_magnification = run_simulation(
+        bh_star_distance_km, planet_mass_kg, planet_star_distance_au, animation_speed
+    )
+
+    # 시뮬레이션 애니메이션
+    for i, frame in enumerate(frames):
+        with simulation_placeholder:
+            st.plotly_chart(frame, use_container_width=True, config={'displayModeBar': False})
+        time.sleep(0.1 / animation_speed) # 속도에 따라 지연 시간 조절
+
     # 행성 운동 특성 그래프 표시
     with planet_graph_placeholder:
         st.plotly_chart(fig_planet_props, use_container_width=True)
