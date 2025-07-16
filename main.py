@@ -1,6 +1,8 @@
 import streamlit as st
 import numpy as np
-import plotly.graph_objects as go
+import plotly.graph_objects as go # Plotly는 시뮬레이션 시각화에 여전히 사용
+import matplotlib.pyplot as plt # Matplotlib 그래프를 위해 추가
+import matplotlib.image as mpimg # Matplotlib에서 이미지 처리를 위해 (필수는 아님)
 import time
 import imageio # GIF 생성을 위해 추가
 import io # 바이트 스트림 처리를 위해 추가
@@ -29,7 +31,11 @@ st.markdown(
     .stPlotlyChart {
         background: black; /* 시뮬레이션 영역만 검정색 */
         border-radius: 10px; /* 모서리를 둥글게 */
-        box_shadow: 0 4px 8px rgba(0,0,0,0.3); /* 검정 배경에 맞게 그림자 조정 */
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3); /* 검정 배경에 맞게 그림자 조정 */
+    }
+    /* Matplotlib 그래프 배경도 어둡게 설정 (Streamlit의 자체 CSS에 의해 적용) */
+    .stApp {
+        background-color: white; /* 전체 앱 배경 */
     }
     </style>
     """,
@@ -193,36 +199,19 @@ def run_simulation(bh_star_initial_distance_scaled, star_mass_kg, planet_star_di
         current_planet_y = current_star_y + planet_orbit_radius_scaled * np.sin(planet_orbit_angle)
 
         # 1. 블랙홀에 의한 기본 중력 렌즈 배율 계산
-        # 광원(source_x, source_y)과 블랙홀(bh_x, bh_y) 사이의 상대적 '충격 매개변수'
-        # 여기서는 광원을 블랙홀 뒤 Y축에 고정했으므로, X축 움직임은 없음.
-        # 시선이 블랙홀 중심에 가까워질수록 배율 증가. (가상의 광원 위치 변화)
-        
-        # 광원의 시뮬레이션 내 '위치'를 시간 변화에 따라 블랙홀 중심에 가까워지게/멀어지게 설정
-        # -> 이렇게 해야 배율 그래프가 변화합니다.
-        # 가장 간단하게는, 광원이 블랙홀 뒤에서 약간 움직인다고 가정
-        # 또는 관측자의 시선이 미묘하게 흔들린다고 가정
-        
-        # 여기서는 항성의 공전이 광원-블랙홀-관측자 시선에 미묘한 섭동을 준다고 가정하여 배율 변화를 유도.
-        # 항성이 블랙홀과 광원의 시선을 가로지를 때 블랙홀 렌즈 배율이 변한다고 모델링
-        
         # 블랙홀-광원 시선에 대한 항성의 상대적 X축 위치
-        star_impact_on_LOS = current_star_x # 항성의 X위치를 광원-BH 시선에 대한 충격 매개변수로 사용
+        star_impact_on_LOS = current_star_x 
         
-        # 블랙홀에 의한 배율은 이 충격 매개변수에 따라 달라짐
-        # 간단화: 광원이 블랙홀 중심(0,0)에 있다면 배율 무한대. 항성이 멀어질수록 배율 감소
         # 여기서 bh_einstein_radius는 실제 거리에 비례하도록 스케일링 되어야 합니다.
         # 현재 sim_scale_unit으로 나눠서 시뮬레이션 공간의 스케일에 맞춤
-        u_bh = (np.abs(star_impact_on_LOS) + 1e-4) / (bh_einstein_radius / sim_scale_unit) # 블랙홀 아인슈타인 반경 대비 상대적 거리
-        magnification_bh = calculate_bh_magnification(u_bh, 1.0) # 1.0은 기준 U값
+        u_bh = (np.abs(star_impact_on_LOS) + 1e-4) / (bh_einstein_radius / sim_scale_unit) 
+        magnification_bh = calculate_bh_magnification(u_bh, 1.0) 
         
         # 2. 항성에 의한 미세중력렌즈 섭동 (추가 효과)
-        # 항성이 광원-관측자 시선에 얼마나 가까이 지나가는지
-        # 광원(0,0)에 대한 항성의 거리
         dist_star_to_source_LOS = np.sqrt(current_star_x**2 + current_star_y**2)
         perturbation_star = calculate_microlensing_perturbation(dist_star_to_source_LOS, star_einstein_radius / sim_scale_unit)
 
         # 3. 행성에 의한 미세중력렌즈 섭동 (추가 효과)
-        # 광원(0,0)에 대한 행성의 거리
         dist_planet_to_source_LOS = np.sqrt(current_planet_x**2 + current_planet_y**2)
         perturbation_planet = calculate_microlensing_perturbation(dist_planet_to_source_LOS, planet_einstein_radius / sim_scale_unit)
         
@@ -232,6 +221,7 @@ def run_simulation(bh_star_initial_distance_scaled, star_mass_kg, planet_star_di
         magnification_data_list.append(final_magnification)
 
 
+        # Plotly Figure 생성 (시뮬레이션 시각화)
         fig_sim = go.Figure()
 
         # 검은색 배경 설정
@@ -330,29 +320,40 @@ def run_simulation(bh_star_initial_distance_scaled, star_mass_kg, planet_star_di
             st.plotly_chart(fig_sim, use_container_width=True, config={'displayModeBar': False})
         time.sleep(0.01 / animation_speed)
 
-    fig_magnification = make_magnification_graph(time_points, np.array(magnification_data_list))
+    # Matplotlib 그래프 생성
+    matplotlib_fig = make_magnification_graph(time_points, np.array(magnification_data_list))
 
-    return frames_for_gif, fig_magnification
+    return frames_for_gif, matplotlib_fig
 
+# --- Matplotlib 그래프 생성 함수 ---
 def make_magnification_graph(time, magnification):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time, y=magnification, mode='lines', name='밝기 배율', line=dict(color='lime', width=2))) # 밝기 그래프 색상 변경
+    fig, ax = plt.subplots(figsize=(10, 4)) # 그래프 크기 설정
 
-    fig.update_layout(
-        title="관측된 빛의 밝기 변화 (복합 중력 렌즈 효과)",
-        xaxis_title="시간 (프레임)",
-        yaxis_title="밝기 배율 (A)",
-        template="plotly_dark", # 그래프 배경도 어둡게
-        hovermode="x unified",
-        height=350,
-        yaxis_range=[0.8, np.max(magnification)*1.1] # y축 범위 조정
-    )
+    ax.plot(time, magnification, color='lime', linewidth=2) # 선 그래프
+    ax.set_title("관측된 빛의 밝기 변화 (복합 중력 렌즈 효과)", color='white')
+    ax.set_xlabel("시간 (프레임)", color='white')
+    ax.set_ylabel("밝기 배율 (A)", color='white')
+    
+    # 그래프 배경 및 텍스트 색상 설정
+    fig.patch.set_facecolor('black') # 그림 전체 배경
+    ax.set_facecolor('black') # 플롯 영역 배경
+    ax.tick_params(axis='x', colors='white') # x축 눈금 색상
+    ax.tick_params(axis='y', colors='white') # y축 눈금 색상
+    ax.spines['left'].set_color('white') # 왼쪽 축 테두리
+    ax.spines['bottom'].set_color('white') # 아래쪽 축 테두리
+    ax.spines['right'].set_color('none') # 오른쪽 축 테두리 없앰
+    ax.spines['top'].set_color('none') # 위쪽 축 테두리 없앰
+
+    ax.grid(True, linestyle='--', alpha=0.6, color='gray') # 격자 추가
+    ax.set_ylim(0.8, np.max(magnification)*1.1) # y축 범위 조정
+
+    plt.tight_layout() # 레이아웃 자동 조정
     return fig
 
 # --- 시뮬레이션 실행 및 업데이트 ---
 if st.button("시뮬레이션 시작 및 GIF 생성"):
     with st.spinner("시뮬레이션 실행 중... (GIF 생성에 시간이 걸릴 수 있습니다.)"):
-        frames_for_gif, fig_magnification = run_simulation(
+        frames_for_gif, matplotlib_fig = run_simulation(
             bh_star_initial_distance_km, star_mass_kg, planet_star_distance_km, planet_mass_kg, animation_speed
         )
 
@@ -365,6 +366,9 @@ if st.button("시뮬레이션 시작 및 GIF 생성"):
     # 생성된 GIF 표시
     gif_placeholder.image(gif_path, caption="복합 중력 렌즈 시뮬레이션 GIF", use_column_width=True)
 
-    # 중력 렌즈 배율 변화 그래프 표시
+    # 중력 렌즈 배율 변화 그래프 표시 (Matplotlib)
     with magnification_graph_placeholder:
-        st.plotly_chart(fig_magnification, use_container_width=True)
+        st.pyplot(matplotlib_fig) # Matplotlib Figure를 Streamlit에 표시
+    
+    # Matplotlib Figure 닫기 (메모리 절약)
+    plt.close(matplotlib_fig)
