@@ -1,11 +1,17 @@
 import streamlit as st
 import numpy as np
-import plotly.graph_objects as go # Plotly는 시뮬레이션 시각화에 여전히 사용
-import matplotlib.pyplot as plt # Matplotlib 그래프를 위해 추가
-import matplotlib.image as mpimg # Matplotlib에서 이미지 처리를 위해 (필수는 아님)
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import imageio
+import io
 import time
-import imageio # GIF 생성을 위해 추가
-import io # 바이트 스트림 처리를 위해 추가
+
+# --- 물리 상수 ---
+G = 6.674e-11  # 중력 상수 (m^3 kg^-1 s^-2)
+c = 3e8      # 광속 (m/s)
+KM_TO_M = 1000 # km를 m로 변환
+AU_TO_M = 149_597_870_700 # 1 AU in meters
+LY_TO_M = 9.461e15 # 1광년 = 9.461e15 미터
 
 # --- 페이지 설정 ---
 st.set_page_config(
@@ -27,7 +33,6 @@ st.markdown(
         padding-left: 2rem;
         padding-bottom: 2rem;
     }
-    /* 시뮬레이션 캔버스 배경을 검정색으로 설정 */
     .stPlotlyChart {
         background: black; /* 시뮬레이션 영역만 검정색 */
         border-radius: 10px; /* 모서리를 둥글게 */
@@ -42,240 +47,254 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.title("💫 복합 중력 렌즈 시뮬레이션")
-st.write("블랙홀, 항성, 행성의 복합적인 중력 렌즈 효과와 빛의 밝기 변화를 시뮬레이션합니다.")
+st.title("🌟 복합 중력 렌즈 시뮬레이션")
+st.write("블랙홀, 항성, 행성 시스템에서 발생하는 중력 렌즈 현상과 관측되는 빛의 밝기 변화를 시뮬레이션합니다.")
 
 # --- 사이드바 설정 ---
 st.sidebar.header("시뮬레이션 변수 설정")
 
-# 1. 블랙홀과 항성 사이의 초기 거리 (km)
-bh_star_initial_distance_km = st.sidebar.slider(
-    "블랙홀-항성 초기 거리 (백만 km)",
-    min_value=10,
-    max_value=100,
-    value=50,
-    step=1,
-    help="블랙홀과 항성(중앙 별) 사이의 초기 거리입니다. (단위: 백만 km)"
+# 1. 블랙홀 질량
+bh_mass_exponent = st.sidebar.slider(
+    "블랙홀 질량 지수 (10^X kg)",
+    min_value=30.0,
+    max_value=40.0,
+    value=36.0, # 10^6 태양 질량 (초거대 블랙홀)
+    step=0.1,
+    help="주 렌즈 역할을 하는 블랙홀의 질량입니다. 질량이 클수록 렌즈 효과가 강해집니다."
 )
-bh_star_initial_distance_scaled = bh_star_initial_distance_km * 1e6 # km로 변환
+bh_mass_kg = 10**bh_mass_exponent
+st.sidebar.write(f"설정된 블랙홀 질량: {bh_mass_kg:.2e} kg")
 
-# 2. 항성 질량 (렌즈 역할에도 영향)
+# 2. 항성 질량
 star_mass_exponent = st.sidebar.slider(
     "항성 질량 지수 (10^X kg)",
     min_value=28.0, # 태양 질량 (10^30 kg) 근처
     max_value=31.0,
     value=30.0,
     step=0.1,
-    help="블랙홀 주위를 공전하는 항성의 질량입니다."
+    help="블랙홀 주위를 공전하는 항성의 질량입니다. 미세 중력 렌즈 효과에 기여합니다."
 )
 star_mass_kg = 10**star_mass_exponent
 st.sidebar.write(f"설정된 항성 질량: {star_mass_kg:.2e} kg")
 
-
-# 3. 행성과 항성 사이의 거리 (AU)
-planet_star_distance_au = st.sidebar.slider(
-    "행성-항성 거리 (AU)",
-    min_value=0.1,
-    max_value=2.0,
-    value=1.0,
-    step=0.01,
-    help="행성이 항성을 공전하는 평균 거리입니다. 1 AU는 지구-태양 거리와 같습니다."
-)
-au_to_km = 149_597_870.7 # 1 AU in km
-planet_star_distance_km = planet_star_distance_au * au_to_km
-st.sidebar.write(f"설정된 행성-항성 거리: {planet_star_distance_au:.2f} AU ({planet_star_distance_km:,.0f} km)")
-
-
-# 4. 행성의 질량 (렌즈 역할에도 영향)
+# 3. 행성 질량
 planet_mass_exponent = st.sidebar.slider(
     "행성 질량 지수 (10^X kg)",
-    min_value=23.0,
+    min_value=23.0, # 지구 질량 (10^24 kg) 근처
     max_value=27.0, # 목성 질량 (10^27 kg) 근처
     value=25.0,
     step=0.1,
-    help="항성 주위를 공전하는 행성의 질량입니다."
+    help="항성 주위를 공전하는 행성의 질량입니다. 그래프의 미세한 굴곡을 만듭니다."
 )
 planet_mass_kg = 10**planet_mass_exponent
 st.sidebar.write(f"설정된 행성 질량: {planet_mass_kg:.2e} kg")
 
+# 4. 블랙홀-항성 거리 (AU)
+bh_star_distance_au = st.sidebar.slider(
+    "블랙홀-항성 거리 (AU)",
+    min_value=100.0,
+    max_value=1000.0,
+    value=500.0,
+    step=10.0,
+    help="항성이 블랙홀을 공전하는 평균 거리입니다. (단위: AU)"
+)
+bh_star_distance_m = bh_star_distance_au * AU_TO_M
+st.sidebar.write(f"설정된 블랙홀-항성 거리: {bh_star_distance_au:.0f} AU ({bh_star_distance_m/AU_TO_M:.2e} AU)")
+
+
+# 5. 행성-항성 거리 (AU)
+planet_star_distance_au = st.sidebar.slider(
+    "행성-항성 거리 (AU)",
+    min_value=0.1,
+    max_value=5.0,
+    value=1.0,
+    step=0.1,
+    help="행성이 항성을 공전하는 평균 거리입니다. (단위: AU)"
+)
+planet_star_distance_m = planet_star_distance_au * AU_TO_M
+st.sidebar.write(f"설정된 행성-항성 거리: {planet_star_distance_au:.1f} AU ({planet_star_distance_m/AU_TO_M:.2e} AU)")
+
+
+# 6. 시뮬레이션 속도
 animation_speed = st.sidebar.slider("애니메이션 속도", 0.1, 2.0, 1.0, 0.1)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("Made with ❤️ by AI Assistant")
 
-# --- 시뮬레이션 영역 ---
-st.header("시뮬레이션")
-simulation_placeholder = st.empty() # 애니메이션 프레임을 표시할 곳
-
-# --- GIF 표시를 위한 Placeholder ---
-gif_placeholder = st.empty()
-
-# --- 그래프 영역 ---
-st.header("데이터 그래프")
-st.subheader("관측된 빛의 밝기 변화 (복합 중력 렌즈)")
-magnification_graph_placeholder = st.empty()
-
-
 # --- 중력 렌즈 배율 계산 함수 ---
-# 블랙홀의 중력 렌즈 효과 (기본)
-def calculate_bh_magnification(impact_param, einstein_radius):
-    # u = impact_param / einstein_radius
+# 점 질량 렌즈의 배율 공식
+def calculate_magnification_point_lens(u):
+    # u = 충격 매개변수 / 아인슈타인 반경 (정규화된 거리)
     # A = (u^2 + 2) / (u * sqrt(u^2 + 4))
-    u = impact_param / einstein_radius
-    if u < 1e-6: # 중심에 매우 가까울 때 발산 방지
-        return 200.0 # 최대 배율 제한
+    if u < 1e-4: # u가 0에 가까울 때 발산 방지 및 유한한 최대 배율 설정
+        return 200.0 # 최대 배율 제한 (실제로는 광원의 크기 때문에 유한)
     magnification = (u**2 + 2) / (u * np.sqrt(u**2 + 4))
     return magnification
 
-# 항성/행성에 의한 미세중력렌즈 섭동 (간단화된 모델)
-# 렌즈 천체가 광원 시선에 얼마나 가까이 지나가는지에 따라 추가적인 밝기 증폭
-def calculate_microlensing_perturbation(distance_to_LOS, einstein_radius_of_lens):
-    # distance_to_LOS: 렌즈 천체(항성/행성)가 광원-관측자 시선에서 얼마나 떨어져 있는지
-    # einstein_radius_of_lens: 해당 렌즈 천체의 아인슈타인 반경 (질량에 비례)
-    u = distance_to_LOS / einstein_radius_of_lens
-    if u < 1e-3: # 매우 가까울 때
-        return 1.0 + (1.0 / (u + 1e-4)) * 5.0 # 추가적인 피크 (더 강하게)
-    return 1.0 + (1.0 / (u**2 + 1)) * 0.5 # 부드러운 섭동 (약하게)
-
 # --- 시뮬레이션 로직 함수 ---
-def run_simulation(bh_star_initial_distance_scaled, star_mass_kg, planet_star_distance_km, planet_mass_kg, animation_speed):
-    num_frames = 800 # 프레임 수 증가 (부드러운 애니메이션)
-    time_points = np.arange(num_frames)
+def run_simulation(bh_mass_kg, star_mass_kg, planet_mass_kg, 
+                   bh_star_distance_m, planet_star_distance_m, animation_speed):
     
-    # 시뮬레이션 공간 스케일 (블랙홀-항성 초기 거리를 기준으로 함)
-    sim_scale_unit = bh_star_initial_distance_scaled / 5e6 # 백만 km를 시뮬레이션 단위로 변환
-                                                           # (예: 5000만 km -> 10단위)
+    num_frames = 600 # 프레임 수 (애니메이션 길이)
+    time_points = np.arange(num_frames) # 시간축 (프레임 단위)
+
+    # --- 거리 설정 (개념적, 광년 단위는 시뮬레이션 스케일링에 사용) ---
+    # 실제 우주적 거리는 매우 크므로, 시뮬레이션 공간에 맞게 스케일링합니다.
+    # D_L: 관측자-렌즈(블랙홀) 거리
+    # D_S: 관측자-광원 거리
+    # D_LS: 렌즈(블랙홀)-광원 거리
+    
+    # 여기서는 D_L, D_LS를 고정된 값으로 가정하고, 블랙홀의 아인슈타인 반경을 계산합니다.
+    # 시뮬레이션의 스케일을 위해 D_L과 D_LS를 적절히 설정합니다.
+    D_L_concept_ly = 5000 # 관측자-블랙홀 거리 (광년)
+    D_LS_concept_ly = 5000 # 블랙홀-광원 거리 (광년)
+    D_S_concept_ly = D_L_concept_ly + D_LS_concept_ly # 관측자-광원 거리 (광년)
+
+    # 미터 단위로 변환
+    D_L_m = D_L_concept_ly * LY_TO_M
+    D_LS_m = D_LS_concept_ly * LY_TO_M
+    D_S_m = D_S_concept_ly * LY_TO_M
+
+    # --- 아인슈타인 반경 계산 (각 질량체별) ---
+    # R_E = sqrt(4GM/c^2 * D_L * D_LS / D_S)
+    
+    # 블랙홀의 아인슈타인 반경 (m)
+    einstein_radius_bh_m = np.sqrt((4 * G * bh_mass_kg / c**2) * (D_L_m * D_LS_m / D_S_m))
+    
+    # 항성의 아인슈타인 반경 (m) - 항성이 미세 렌즈 역할을 할 때
+    # 항성 자체의 아인슈타인 반경은 매우 작으므로, D_L, D_LS, D_S를 항성 기준으로 다시 설정해야 하지만
+    # 여기서는 간단화를 위해 블랙홀 시스템의 D_L, D_LS, D_S를 공유하며 질량만 다르게 적용
+    einstein_radius_star_m = np.sqrt((4 * G * star_mass_kg / c**2) * (D_L_m * D_LS_m / D_S_m))
+
+    # 행성의 아인슈타인 반경 (m) - 행성이 미세 렌즈 역할을 할 때
+    einstein_radius_planet_m = np.sqrt((4 * G * planet_mass_kg / c**2) * (D_L_m * D_LS_m / D_S_m))
+
+    # --- 시뮬레이션 공간 스케일 설정 ---
+    # 시뮬레이션 화면의 x, y 범위를 블랙홀의 아인슈타인 반경을 기준으로 설정
+    # 예를 들어, 화면의 절반이 블랙홀 아인슈타인 반경의 2배가 되도록
+    sim_scale_factor = 2.5 # 아인슈타인 반경의 몇 배를 화면 절반으로 할지
+    sim_unit_m_per_plotly_unit = einstein_radius_bh_m / sim_scale_factor # Plotly 1단위가 몇 미터인지
+    sim_range_plotly_units = sim_scale_factor * 2 # Plotly 화면 범위 (-sim_scale_factor ~ +sim_scale_factor)
 
     # 블랙홀 위치 (중심)
     bh_x, bh_y = 0, 0
-    
-    # 블랙홀 슈바르츠실트 반지름 (개념적 크기, 실제 렌즈 효과는 아인슈타인 반경으로)
-    # R_s = 2GM/c^2. 여기서는 시각적 크기를 위해 대략적인 스케일로 사용
-    bh_size_visual = 20 # 고정 시각적 크기 또는 질량에 비례하게 조정
-    
-    # 블랙홀의 아인슈타인 반경 (중력 렌즈의 스케일)
-    # R_E = sqrt(4GM/c^2 * D_LS * D_L / D_S). 여기서는 간단화를 위해 질량에만 비례
-    # D_L, D_S, D_LS는 거리 요소. 여기서는 대략적으로 질량에 루트 비례하도록
-    G = 6.674e-11 # 중력 상수
-    c = 3e8 # 광속
-    
-    # 태양 질량 블랙홀의 아인슈타인 반경: 약 1 AU
-    # 블랙홀 질량을 따로 설정하지 않았으므로, 항성 질량에 비례하여 스케일링
-    bh_mass_estimate = star_mass_kg * 1000 # 항성보다 훨씬 무거운 블랙홀 가정
-    bh_einstein_radius = np.sqrt(4 * G * bh_mass_estimate / c**2) * 1e-6 # 대략적인 아인슈타인 반경 (km) 스케일링
+    bh_size_visual = 20 # 시각적인 블랙홀 크기 (고정)
 
-    # 광원 (블랙홀 뒤에 고정된 먼 별)
-    source_x, source_y = 0, -sim_scale_unit * 1.0 # 블랙홀 Y축 아래에 고정 (시선 일치)
-
-    # 항성 공전 궤도 (블랙홀 주위)
-    star_orbit_radius_scaled = bh_star_initial_distance_scaled / (sim_scale_unit * 1e6 / 10) # 시뮬레이션 단위로 변환
-    
-    # 행성 공전 궤도 (항성 주위)
-    planet_orbit_radius_scaled = planet_star_distance_km / (sim_scale_unit * 1e6 / 10) # 시뮬레이션 단위로 변환
-
-    # 별, 행성 각각의 아인슈타인 반경 (미세중력렌즈 효과용)
-    star_einstein_radius = np.sqrt(4 * G * star_mass_kg / c**2) * 1e-6 # km 스케일링
-    planet_einstein_radius = np.sqrt(4 * G * planet_mass_kg / c**2) * 1e-6 # km 스케일링
-    
-    # 배경 별
-    num_stars = 2000
-    star_x_bg = np.random.uniform(-sim_scale_unit * 1.5, sim_scale_unit * 1.5, num_stars)
-    star_y_bg = np.random.uniform(-sim_scale_unit * 1.5, sim_scale_unit * 1.5, num_stars)
-    star_sizes = np.random.uniform(0.5, 3.5, num_stars)
-    star_opacities = np.random.uniform(0.4, 1.0, num_stars)
+    # 광원 위치 (블랙홀 뒤에 고정된 먼 별, 시뮬레이션의 가상 Y축 아래)
+    source_x, source_y = 0, -sim_range_plotly_units * 0.8 # 시뮬레이션 화면 아래쪽에 고정
 
     frames_for_gif = []
     magnification_data_list = []
 
+    # --- 궤도 매개변수 ---
+    # 항성의 블랙홀 주위 공전 주기 (시뮬레이션 프레임 수에 비례하여 설정)
+    # 시뮬레이션 동안 항성이 몇 바퀴 돌지 결정
+    star_orbit_cycles = 1.0 # 시뮬레이션 동안 항성이 1바퀴 공전
+    star_angular_speed = 2 * np.pi * star_orbit_cycles / num_frames
+
+    # 행성의 항성 주위 공전 주기 (항성보다 훨씬 빠르게 설정하여 굴곡 생성)
+    planet_orbit_cycles = 10.0 # 시뮬레이션 동안 행성이 10바퀴 공전
+    planet_angular_speed = 2 * np.pi * planet_orbit_cycles / num_frames
+
+    # 관측자의 시선이 렌즈 시스템을 가로지르는 가상의 궤적 (배율 변화 유도)
+    # 여기서는 광원이 X축으로 움직이는 것처럼 모델링하여 배율 변화를 유도
+    # (실제로는 관측자가 움직이거나 렌즈 시스템이 움직이는 효과)
+    source_apparent_x_trajectory = np.linspace(-sim_range_plotly_units * 0.5, sim_range_plotly_units * 0.5, num_frames)
+
     for i in range(num_frames):
+        # --- 궤도 계산 ---
         # 항성의 블랙홀 주위 공전
-        star_orbit_angle = 2 * np.pi * (i / num_frames) * 1.5 # 1.5바퀴 공전
-        current_star_x = star_orbit_radius_scaled * np.cos(star_orbit_angle)
-        current_star_y = star_orbit_radius_scaled * np.sin(star_orbit_angle)
-
+        star_orbit_angle = star_angular_speed * i
+        current_star_x_bh_centered = (bh_star_distance_m / sim_unit_m_per_plotly_unit) * np.cos(star_orbit_angle)
+        current_star_y_bh_centered = (bh_star_distance_m / sim_unit_m_per_plotly_unit) * np.sin(star_orbit_angle)
+        
         # 행성의 항성 주위 공전
-        planet_orbit_angle = 2 * np.pi * (i / num_frames) * 5 # 행성은 더 빠르게 공전
-        current_planet_x = current_star_x + planet_orbit_radius_scaled * np.cos(planet_orbit_angle)
-        current_planet_y = current_star_y + planet_orbit_radius_scaled * np.sin(planet_orbit_angle)
+        planet_orbit_angle = planet_angular_speed * i
+        current_planet_x_star_centered = (planet_star_distance_m / sim_unit_m_per_plotly_unit) * np.cos(planet_orbit_angle)
+        current_planet_y_star_centered = (planet_star_distance_m / sim_unit_m_per_plotly_unit) * np.sin(planet_orbit_angle)
 
-        # 1. 블랙홀에 의한 기본 중력 렌즈 배율 계산
-        # 블랙홀-광원 시선에 대한 항성의 상대적 X축 위치
-        star_impact_on_LOS = current_star_x 
-        
-        # 여기서 bh_einstein_radius는 실제 거리에 비례하도록 스케일링 되어야 합니다.
-        # 현재 sim_scale_unit으로 나눠서 시뮬레이션 공간의 스케일에 맞춤
-        u_bh = (np.abs(star_impact_on_LOS) + 1e-4) / (bh_einstein_radius / sim_scale_unit) 
-        magnification_bh = calculate_bh_magnification(u_bh, 1.0) 
-        
-        # 2. 항성에 의한 미세중력렌즈 섭동 (추가 효과)
-        dist_star_to_source_LOS = np.sqrt(current_star_x**2 + current_star_y**2)
-        perturbation_star = calculate_microlensing_perturbation(dist_star_to_source_LOS, star_einstein_radius / sim_scale_unit)
+        # 행성의 절대 위치 (블랙홀 중심 기준)
+        current_planet_x_bh_centered = current_star_x_bh_centered + current_planet_x_star_centered
+        current_planet_y_bh_centered = current_star_y_bh_centered + current_planet_y_star_centered
 
-        # 3. 행성에 의한 미세중력렌즈 섭동 (추가 효과)
-        dist_planet_to_source_LOS = np.sqrt(current_planet_x**2 + current_planet_y**2)
-        perturbation_planet = calculate_microlensing_perturbation(dist_planet_to_source_LOS, planet_einstein_radius / sim_scale_unit)
+        # --- 중력 렌즈 배율 계산 ---
+        # 광원의 현재 (가상) X 위치 (관측자 시선에 대한 상대적 위치)
+        current_apparent_source_x = source_apparent_x_trajectory[i]
+
+        # 1. 블랙홀에 의한 기본 중력 렌즈 배율
+        # 광원(current_apparent_source_x, source_y)이 블랙홀(0,0)에 대해 얼마나 가까운가
+        # 여기서 u는 Plotly 단위 스케일에서의 아인슈타인 반경 대비 상대적 거리
+        u_bh = np.sqrt(current_apparent_source_x**2 + source_y**2) / (einstein_radius_bh_m / sim_unit_m_per_plotly_unit)
+        magnification_bh = calculate_magnification_point_lens(u_bh)
+
+        # 2. 항성에 의한 미세 중력 렌즈 배율 섭동
+        # 항성 (current_star_x_bh_centered, current_star_y_bh_centered)이 광원 시선에 얼마나 가까운가
+        # (광원 시선은 대략 X=current_apparent_source_x, Y=0 라인으로 가정)
+        # 항성과 광원 시선 사이의 최소 거리 (X축으로만 고려)
+        dist_star_to_LOS = np.abs(current_star_x_bh_centered - current_apparent_source_x)
+        u_star_microlens = dist_star_to_LOS / (einstein_radius_star_m / sim_unit_m_per_plotly_unit)
+        perturbation_star = calculate_magnification_point_lens(u_star_microlens) # 항성 자체의 배율
+
+        # 3. 행성에 의한 미세 중력 렌즈 배율 섭동 (굴곡의 주 원인)
+        # 행성 (current_planet_x_bh_centered, current_planet_y_bh_centered)이 광원 시선에 얼마나 가까운가
+        dist_planet_to_LOS = np.abs(current_planet_x_bh_centered - current_apparent_source_x)
+        u_planet_microlens = dist_planet_to_LOS / (einstein_radius_planet_m / sim_unit_m_per_plotly_unit)
+        perturbation_planet = calculate_magnification_point_lens(u_planet_microlens) # 행성 자체의 배율
         
-        # 최종 배율 = 블랙홀 배율 * 항성 섭동 * 행성 섭동 (곱하는 방식으로 복합 효과)
+        # 최종 배율 = 블랙홀 배율 * 항성 섭동 * 행성 섭동
+        # 각 렌즈 효과가 독립적으로 작용하여 밝기를 증폭시킨다고 가정 (간단화된 모델)
         final_magnification = magnification_bh * perturbation_star * perturbation_planet
-        final_magnification = min(final_magnification, 200.0) # 최대 배율 제한
+        final_magnification = min(final_magnification, 500.0) # 과도한 배율 제한
         magnification_data_list.append(final_magnification)
 
-
-        # Plotly Figure 생성 (시뮬레이션 시각화)
+        # --- Plotly Figure 생성 (시뮬레이션 시각화) ---
         fig_sim = go.Figure()
 
-        # 검은색 배경 설정
         fig_sim.update_layout(
             paper_bgcolor='black',
             plot_bgcolor='black',
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-sim_scale_unit, sim_scale_unit]),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-sim_scale_unit, sim_scale_unit]),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-sim_range_plotly_units, sim_range_plotly_units]),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-sim_range_plotly_units, sim_range_plotly_units]),
             showlegend=False,
             margin=dict(l=0, r=0, t=0, b=0),
-            height=600
+            height=600,
+            width=800 # 고정 너비로 설정하여 GIF 품질 유지
         )
 
-        # 배경 별 (흰색 점)
-        fig_sim.add_trace(go.Scatter(
-            x=star_x_bg, y=star_y_bg,
-            mode='markers',
-            marker=dict(size=star_sizes, color='white', opacity=star_opacities, line_width=0),
-            name='Stars'
-        ))
-
-        # 블랙홀의 아크리션 디스크 (강착원반)
+        # 블랙홀의 아크리션 디스크 (강착원반) - 주황색 그라데이션
         for k in range(10, 0, -1):
-            disk_radius = bh_size_visual * k * 0.4 / 10
+            disk_radius = bh_size_visual * k * 0.4 / 10 * (sim_range_plotly_units / bh_size_visual) * 0.1 # 시뮬레이션 스케일에 맞춤
             color_val = int(255 * (k / 10))
             fig_sim.add_shape(type="circle",
                               xref="x", yref="y",
                               x0=bh_x - disk_radius, y0=bh_y - disk_radius,
                               x1=bh_x + disk_radius, y1=bh_y + disk_radius,
-                              fillcolor=f'rgba(255, {color_val}, 0, {0.05 + k*0.05})',
+                              fillcolor=f'rgba(255, {color_val}, 0, {0.05 + k*0.05})', # 주황색 계열
                               line_width=0,
                               layer="below")
 
-        # 보라빛 블랙홀 (중앙)
+        # 블랙홀 (검은색)
         fig_sim.add_trace(go.Scatter(
             x=[bh_x], y=[bh_y],
             mode='markers',
             marker=dict(
                 size=bh_size_visual,
-                color='purple',
-                opacity=0.6,
+                color='black', # 블랙홀은 검은색
+                opacity=1.0,
                 line=dict(width=0),
                 symbol='circle'
             ),
             name='Black Hole'
         ))
 
-        # 광원 (블랙홀 뒤에 고정된 먼 별) - 밝기 변화를 시각적으로 보여줌
+        # 광원 (밝기 및 크기 변화)
+        source_visual_size = 20 + (final_magnification - 1) * 0.5 # 배율에 따라 크기 변화
         fig_sim.add_trace(go.Scatter(
-            x=[source_x], y=[source_y],
+            x=[current_apparent_source_x], y=[source_y],
             mode='markers',
             marker=dict(
-                size=30 + (final_magnification - 1) * 2, # 배율에 따라 크기 변화
-                color='gold',
+                size=source_visual_size,
+                color='gold', # 광원은 금색
                 opacity=0.9,
                 line=dict(width=0),
                 symbol='circle'
@@ -283,13 +302,13 @@ def run_simulation(bh_star_initial_distance_scaled, star_mass_kg, planet_star_di
             name='Distant Source'
         ))
         
-        # 항성 (블랙홀 주위 공전)
+        # 항성 (노란색 원)
         fig_sim.add_trace(go.Scatter(
-            x=[current_star_x], y=[current_star_y],
+            x=[current_star_x_bh_centered], y=[current_star_y_bh_centered],
             mode='markers',
             marker=dict(
-                size=20, # 항성 크기
-                color='red', # 항성 색상
+                size=15, # 항성 크기
+                color='yellow', # 항성 색상
                 opacity=0.9,
                 line=dict(width=0),
                 symbol='circle'
@@ -297,20 +316,62 @@ def run_simulation(bh_star_initial_distance_scaled, star_mass_kg, planet_star_di
             name='Star'
         ))
 
-        # 행성 (항성 주위 공전)
+        # 행성 (주황색 원)
         fig_sim.add_trace(go.Scatter(
-            x=[current_planet_x], y=[current_planet_y],
+            x=[current_planet_x_bh_centered], y=[current_planet_y_bh_centered],
             mode='markers',
             marker=dict(
-                size=10, # 행성 크기
-                color='deepskyblue',
+                size=8, # 행성 크기
+                color='orange', # 행성 색상
                 opacity=0.9,
                 line=dict(width=0),
                 symbol='circle'
             ),
             name='Exoplanet'
         ))
-        
+
+        # 개념적인 빛 경로 (광원에서 블랙홀을 거쳐 관측자로)
+        # 광원에서 블랙홀 주변으로 휘어지는 곡선
+        num_light_paths = 5
+        light_path_color = 'white'
+        for path_idx in range(num_light_paths):
+            # 광원(source_x, source_y)에서 시작
+            # 블랙홀 주변을 휘어져서 관측자 시점 (current_apparent_source_x, 0)으로 가는 경로
+            # 간단화를 위해 블랙홀 중심을 향해 가다가 휘어지는 곡선으로 표현
+            start_x = current_apparent_source_x + (path_idx - (num_light_paths-1)/2) * 0.1 # 광원 근처에서 시작점 분산
+            start_y = source_y
+
+            # 블랙홀 근처의 굴절점
+            bend_x = bh_x + (start_x - bh_x) * 0.5 # 블랙홀을 향해
+            bend_y = bh_y + (start_y - bh_y) * 0.5 # 블랙홀을 향해
+
+            # 관측자 시점으로 향하는 끝점
+            end_x = current_apparent_source_x + (path_idx - (num_light_paths-1)/2) * 0.1 # 관측자 시점으로 수렴
+            end_y = sim_range_plotly_units * 0.8 # 화면 위쪽으로
+
+            # 베지어 곡선처럼 부드러운 경로를 위해 중간점 추가
+            mid_x1 = start_x + (bend_x - start_x) * 0.5
+            mid_y1 = start_y + (bend_y - start_y) * 0.5
+
+            mid_x2 = bend_x + (end_x - bend_x) * 0.5
+            mid_y2 = bend_y + (end_y - bend_y) * 0.5
+
+            # 빛이 휘어지는 효과를 더 강조하기 위해 블랙홀 근처에서 더 강하게 휘도록 조정
+            # 블랙홀에 가까울수록 더 많이 휘도록
+            curve_factor = 0.5 # 휘는 정도 조절
+            mid_x1 += (bh_x - mid_x1) * curve_factor
+            mid_y1 += (bh_y - mid_y1) * curve_factor
+            mid_x2 += (bh_x - mid_x2) * curve_factor
+            mid_y2 += (bh_y - mid_y2) * curve_factor
+
+            fig_sim.add_trace(go.Scatter(
+                x=[start_x, mid_x1, bend_x, mid_x2, end_x],
+                y=[start_y, mid_y1, bend_y, mid_y2, end_y],
+                mode='lines',
+                line=dict(color=light_path_color, width=1, dash='dot'),
+                showlegend=False
+            ))
+
         # Plotly Figure를 이미지로 변환하여 GIF 프레임으로 사용
         img_bytes = fig_sim.to_image(format="png", width=800, height=600, scale=1)
         frames_for_gif.append(imageio.v2.imread(io.BytesIO(img_bytes)))
@@ -330,9 +391,9 @@ def make_magnification_graph(time, magnification):
     fig, ax = plt.subplots(figsize=(10, 4)) # 그래프 크기 설정
 
     ax.plot(time, magnification, color='lime', linewidth=2) # 선 그래프
-    ax.set_title("관측된 빛의 밝기 변화 (복합 중력 렌즈 효과)", color='white')
-    ax.set_xlabel("시간 (프레임)", color='white')
-    ax.set_ylabel("밝기 배율 (A)", color='white')
+    ax.set_title("관측된 광원의 밝기 변화", color='white', fontsize=16)
+    ax.set_xlabel("시간 (프레임)", color='white', fontsize=12)
+    ax.set_ylabel("밝기 배율 (A)", color='white', fontsize=12)
     
     # 그래프 배경 및 텍스트 색상 설정
     fig.patch.set_facecolor('black') # 그림 전체 배경
@@ -344,8 +405,8 @@ def make_magnification_graph(time, magnification):
     ax.spines['right'].set_color('none') # 오른쪽 축 테두리 없앰
     ax.spines['top'].set_color('none') # 위쪽 축 테두리 없앰
 
-    ax.grid(True, linestyle='--', alpha=0.6, color='gray') # 격자 추가
-    ax.set_ylim(0.8, np.max(magnification)*1.1) # y축 범위 조정
+    ax.grid(True, linestyle='--', alpha=0.3, color='gray') # 격자 추가
+    ax.set_ylim(0.8, np.max(magnification)*1.1 if np.max(magnification) > 1.0 else 2.0) # y축 범위 조정
 
     plt.tight_layout() # 레이아웃 자동 조정
     return fig
@@ -354,17 +415,18 @@ def make_magnification_graph(time, magnification):
 if st.button("시뮬레이션 시작 및 GIF 생성"):
     with st.spinner("시뮬레이션 실행 중... (GIF 생성에 시간이 걸릴 수 있습니다.)"):
         frames_for_gif, matplotlib_fig = run_simulation(
-            bh_star_initial_distance_km, star_mass_kg, planet_star_distance_km, planet_mass_kg, animation_speed
+            bh_mass_kg, star_mass_kg, planet_mass_kg, 
+            bh_star_distance_m, planet_star_distance_m, animation_speed
         )
 
         # GIF 생성 및 저장
-        gif_path = "complex_gravity_lens_simulation.gif"
+        gif_path = "gravity_lens_simulation.gif"
         imageio.mimsave(gif_path, frames_for_gif, fps=20 * animation_speed) # fps는 초당 프레임 수
         
     st.success("시뮬레이션 완료 및 GIF 생성!")
     
     # 생성된 GIF 표시
-    gif_placeholder.image(gif_path, caption="복합 중력 렌즈 시뮬레이션 GIF", use_column_width=True)
+    gif_placeholder.image(gif_path, caption="중력 렌즈 시뮬레이션 GIF", use_column_width=True)
 
     # 중력 렌즈 배율 변화 그래프 표시 (Matplotlib)
     with magnification_graph_placeholder:
