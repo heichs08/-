@@ -1,8 +1,7 @@
-matplotlib
+streamlit
 numpy
 plotly
-koreanize-matplotlib
 imageio
-streamlit
 Pillow
-kaleido
+kaleido  # 이 줄이 반드시 포함되어야 합니다.
+matplotlib # matplotlib을 사용한다면 추가
