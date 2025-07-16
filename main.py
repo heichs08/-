@@ -74,12 +74,12 @@ star_mass_exponent = st.sidebar.slider(
 star_mass_kg = 10**star_mass_exponent
 st.sidebar.write(f"현재 설정된 항성 질량: {star_mass_kg:.2e} kg")
 
-# 3. 행성 질량
+# 3. 행성 질량 (기본값을 약간 높여 굴곡이 더 잘 보이도록 조정)
 planet_mass_exponent = st.sidebar.slider(
     "행성 질량 지수 (10^X kg)",
     min_value=23.0, # 예: 지구 질량 (10^24 kg) 근처
     max_value=27.0, # 예: 목성 질량 (10^27 kg) 근처
-    value=25.0,
+    value=26.0, # 기본값을 10^26 kg (목성 질량보다 약간 더)로 조정하여 굴곡 강화
     step=0.1,
     help="항성 주위를 공전하는 행성의 질량입니다. 밝기 그래프에 미세한 굴곡을 만듭니다."
 )
@@ -99,12 +99,12 @@ bh_star_distance_m = bh_star_distance_au * AU_TO_M
 st.sidebar.write(f"현재 설정된 블랙홀-항성 거리: {bh_star_distance_au:.0f} AU")
 
 
-# 5. 행성-항성 거리 (AU)
+# 5. 행성-항성 거리 (AU) (기본값을 약간 줄여 정렬 가능성 높임)
 planet_star_distance_au = st.sidebar.slider(
     "행성-항성 거리 (AU)",
     min_value=0.1,
     max_value=5.0,
-    value=1.0,
+    value=0.5, # 기본값을 0.5 AU로 조정하여 행성이 더 자주 시선에 정렬되도록 함
     step=0.1,
     help="행성이 항성을 공전하는 평균 거리입니다. (단위: AU)"
 )
@@ -339,9 +339,6 @@ def run_simulation(bh_mass_kg, star_mass_kg, planet_mass_kg,
         with simulation_placeholder:
             st.plotly_chart(fig_sim, use_container_width=True, config={'displayModeBar': False})
         
-        # Matplotlib 그래프 업데이트 (매 프레임마다 그리지 않고, 데이터만 축적)
-        # 마지막 프레임에서 최종 그래프를 그립니다.
-        
         time.sleep(0.01 / animation_speed)
 
     # 시뮬레이션이 끝난 후 Matplotlib 그래프를 그립니다.
@@ -372,7 +369,18 @@ def make_magnification_graph(time, magnification):
     ax.spines['top'].set_color('none') # 위쪽 축 테두리 없앰
 
     ax.grid(True, linestyle='--', alpha=0.3, color='gray') # 격자 추가
-    ax.set_ylim(0.8, np.max(magnification)*1.1 if np.max(magnification) > 1.0 else 2.0) # y축 범위 조정
+    
+    # Y축 범위 조정: 미세한 굴곡이 잘 보이면서도 전체적인 트렌드를 볼 수 있도록
+    # 배율의 최소값과 최대값에 기반하여 유동적으로 설정
+    min_mag = np.min(magnification)
+    max_mag = np.max(magnification)
+    
+    # 기본적으로 0.8부터 시작하거나, 최소 배율보다 약간 낮게 시작
+    lower_bound = max(0.8, min_mag * 0.9) 
+    # 최대 배율보다 약간 높게 설정
+    upper_bound = max_mag * 1.1 if max_mag > 1.0 else 2.0 
+    
+    ax.set_ylim(lower_bound, upper_bound)
 
     plt.tight_layout() # 레이아웃 자동 조정
     return fig
